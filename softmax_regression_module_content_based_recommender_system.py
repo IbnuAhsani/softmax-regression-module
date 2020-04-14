@@ -9,6 +9,9 @@ Original file is located at
 **Import Libs**
 """
 
+# Commented out IPython magic to ensure Python compatibility.
+# %tensorflow_version 1.x
+
 import tensorflow as tf
 import numpy as np
 import pandas as pd
@@ -17,7 +20,8 @@ from sklearn.model_selection import train_test_split
 
 """**Load Dataset**"""
 
-data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/fv-tf-idf-scores.csv', header=None, sep=',')
+data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/data-10-fv-tf-idf-scores-7477-row-31-class-200-feature.csv', header=None, sep=',')
+# data_frame = data_frame_unshuffled.sample(frac=1).reset_index(drop=True)
 
 header = []
 
@@ -44,11 +48,11 @@ print(y_train.shape, y_test.shape)
 
 """**Hyperparameters**"""
 
-num_features = 500
-num_labels = 5
+num_features = 5700
+num_labels = 31
 learning_rate = 0.001
-batch_size = 3
-training_epochs = 10
+batch_size = 64
+training_epochs = 1000
 display_step = 1
 
 """**One-Hot Encoding**"""
@@ -123,4 +127,3 @@ with tf.Session() as sess:
   # Calculate accuracy
   acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
   print("Test Accuracy:", acc.eval({x: x_test_one_hot_encoded, y: y_test_one_hot_encoded}))
-
