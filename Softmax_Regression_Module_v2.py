@@ -19,14 +19,16 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from imblearn.under_sampling import NearMiss
+from imblearn.over_sampling import SMOTE
+from imblearn.combine import SMOTETomek
 from matplotlib import pyplot as plt
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 
 np.set_printoptions(threshold=sys.maxsize)
 
 # %matplotlib inline
 
-def accuracy(predictions, labels):
+def get_accuracy(predictions, labels):
   return (100.0 * np.sum(np.argmax(predictions, 1) == np.argmax(labels, 1)) / predictions.shape[0])
 
 """**Example Program**"""
@@ -78,15 +80,15 @@ def accuracy(predictions, labels):
 
 #     if (step % 500 == 0):
 #       print("minibatch loss at step %d: %f" % (step, l))
-#       print("minibatch accuracy: %.1f%%" % accuracy(predictions, batch_labels))
-#       print("validation accuracy: %.1f%%" % accuracy(valid_prediction.eval(), mnist.validation.labels))
+#       print("minibatch accuracy: %.1f%%" % get_accuracy(predictions, batch_labels))
+#       print("validation accuracy: %.1f%%" % get_accuracy(valid_prediction.eval(), mnist.validation.labels))
 #       print("\n")
   
-#   print("test accuracy: %.1f%%" % accuracy(test_prediction.eval(), mnist.test.labels))
+#   print("test accuracy: %.1f%%" % get_accuracy(test_prediction.eval(), mnist.test.labels))
 
-"""**Actual Program**"""
+"""**Data Preprocessing**"""
 
-data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/Hypothesis Data/data-16-fv-tf-idf-scores-7561-row-9-class-200-feature.csv', header=None, sep=',')
+data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/Hypothesis Data/data-17-fv-tf-idf-scores-200.csv', header=None, sep=',')
 data_frame.shape
 
 header = []
@@ -106,11 +108,29 @@ value_counts.rename_axis('journal_id').to_frame('counts')
 data_labels = data_frame['target']
 data_features = data_frame.drop('target',axis=1)
 
+near_miss = SMOTE()
+x_undersampled, y_undersampled = near_miss.fit_sample(data_features, data_labels)
+
+print(x_undersampled.shape)
+print(y_undersampled.shape)
+
+data_labels = data_frame['target']
+data_features = data_frame.drop('target',axis=1)
+
 near_miss = NearMiss(random_state=42)
 x_undersampled, y_undersampled = near_miss.fit_sample(data_features, data_labels)
 
 print(x_undersampled.shape)
 print(y_undersampled.shape)
+
+# data_labels = data_frame['target']
+# data_features = data_frame.drop('target',axis=1)
+
+# smk = SMOTETomek(random_state=42)
+# x_undersampled, y_undersampled = smk.fit_sample(data_features, data_labels)
+
+# print(x_undersampled.shape)
+# print(y_undersampled.shape)
 
 data_features_df = pd.DataFrame(data = x_undersampled[0:,0:], 
                                 index = [i for i in range(x_undersampled.shape[0])],
@@ -131,9 +151,10 @@ value_counts_undersampled.plot(kind='bar')
 value_counts_undersampled.rename_axis('journal_id').to_frame('counts')
 
 data_frame_shuffled_once = data_frame_undersampled.sample(frac=1)
-data_frame_shuffled_four = data_frame_shuffled_once.sample(frac=1)
-data_frame_shuffled_twice = data_frame_shuffled_four.sample(frac=1)
+data_frame_shuffled_twice = data_frame_shuffled_once.sample(frac=1)
 data_frame_shuffled_twice.head()
+
+"""**Program Train Test Split Data**"""
 
 data_train, data_test = train_test_split(data_frame_shuffled_twice, test_size = 0.2)
 
@@ -143,11 +164,11 @@ data_train_labels = data_train['target']
 data_test_features = data_test.drop('target',axis=1)
 data_test_labels = data_test['target']
 
-batch_size = 128
+batch_size = 32
 beta = .001
 learning_rate = 0.001
 num_epoch = 101
-num_features = 1565
+num_features = 1561
 num_labels = 9
 
 def to_onehot(y):
@@ -191,14 +212,16 @@ with tf.Session(graph=graph) as session:
 
   avg_batch_loss_list = []
   batch_accuracy_list = []
-  total_batch = len(data_frame)//batch_size
+  total_batch = len(data_train_features)//batch_size
+  print("length of data train: %d" % len(data_train_features))
+  print("total batch: %d" % total_batch)
 
   for epoch in range(num_epoch):
-
+    
     total_loss = 0
 
-    for i in range(total_batch):
-
+    for i in range(0, (total_batch * batch_size), batch_size):
+      batch_index = range(i, i+1*batch_size)
       batch_data = data_train_features[i:i+1*batch_size]
       batch_labels = data_train_labels_one_hot_encoded[i:i+1*batch_size]
 
@@ -207,8 +230,8 @@ with tf.Session(graph=graph) as session:
 
       total_loss += l
 
-      if (i == total_batch - 1):
-        batch_accuracy = accuracy(predictions, batch_labels)
+      if (i == (total_batch * batch_size) - batch_size):
+        batch_accuracy = get_accuracy(predictions, batch_labels)
         batch_accuracy_list.append(batch_accuracy)
 
         avg_batch_loss = total_loss / total_batch
@@ -235,4 +258,156 @@ with tf.Session(graph=graph) as session:
   plt.legend()
   plt.show()
 
-  print("test accuracy: %.1f%%" % accuracy(test_prediction.eval(), data_test_labels_one_hot_encoded))
+  print("test accuracy: %.1f%%" % get_accuracy(test_prediction.eval(), data_test_labels_one_hot_encoded))
+
+"""---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+**FAILED Program KFOLD**
+"""
+
+batch_size = 32
+beta = .001
+learning_rate = 0.001
+num_epoch = 101
+num_features = 1561
+num_labels = 9
+num_k_splits = 10
+
+def to_onehot(y):
+  data = np.zeros((num_labels))
+  data[y] = 1
+  return data
+
+history = {}
+fold_counter = 1
+kfold = KFold(n_splits= num_k_splits, random_state=None, shuffle=True)
+
+for train_index, test_index in kfold.split(data_frame_shuffled_twice):
+
+  print("\n==================================")
+  print("Fold: %d" % fold_counter)
+
+  k_fold_train_data = data_frame_shuffled_twice.loc[train_index, : ]
+  k_fold_train_features = k_fold_train_data.drop('target',axis=1).to_numpy()
+  k_fold_train_labels = k_fold_train_data['target']
+  k_fold_train_labels_one_hot_encoded = np.array([to_onehot(label) for label in k_fold_train_labels])
+
+  k_fold_test_data = data_frame_shuffled_twice.loc[test_index, : ]
+  k_fold_test_features = k_fold_test_data.drop('target',axis=1).to_numpy()
+  k_fold_test_labels = k_fold_test_data['target']
+  k_fold_test_labels_one_hot_encoded = np.array([to_onehot(label) for label in k_fold_test_labels])
+
+  reindexed_train_index = np.arange(len(train_index)) 
+
+  graph = tf.Graph()
+
+  with graph.as_default():
+
+    tf_train_dataset = tf.placeholder(tf.float32, shape=(batch_size, num_features))
+    tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
+    tf_test_dataset = tf.constant(k_fold_test_features, dtype=tf.float32)
+
+    w_logit = tf.Variable(tf.truncated_normal([num_features, num_labels]))
+    b_logit = tf.Variable(tf.zeros([num_labels]))
+
+    def model(data):
+      return tf.matmul(data, w_logit) + b_logit
+
+    logits = model(tf_train_dataset)
+    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=tf_train_labels))
+    regularized_loss = tf.nn.l2_loss(w_logit) 
+    total_loss = loss + beta + regularized_loss
+
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(total_loss)
+
+    train_prediction = tf.nn.softmax(logits)
+    test_prediction = tf.nn.softmax(model(tf_test_dataset))
+
+  with tf.Session(graph=graph) as session:
+    tf.global_variables_initializer().run()
+
+    avg_batch_loss_list = []
+    batch_accuracy_list = []
+    total_batch = len(train_index)//batch_size
+    
+    for epoch in range(num_epoch):
+
+      total_loss = 0
+
+      for i in range(0, (total_batch * batch_size), batch_size):
+
+        batch_index = reindexed_train_index[i : i+1*batch_size]
+        batch_features = k_fold_train_features[batch_index, : ]
+        batch_labels = k_fold_train_labels_one_hot_encoded[batch_index, : ]
+
+        feed_dict = {tf_train_dataset : batch_features, tf_train_labels : batch_labels}
+        _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
+
+        total_loss += l
+
+      batch_accuracy = get_accuracy(predictions, batch_labels)
+      batch_accuracy_list.append(batch_accuracy)
+
+      avg_batch_loss = total_loss / total_batch
+      avg_batch_loss_list.append(avg_batch_loss)
+      
+      print("epoch: %d" % epoch)
+      print("minibatch loss: %f" % avg_batch_loss)
+      print("minibatch accuracy: %.1f%%" % batch_accuracy)
+      print("\n")
+
+    test_accuracy = get_accuracy(test_prediction.eval(), k_fold_test_labels_one_hot_encoded)
+    
+    print("test accuracy: %.1f%%" % test_accuracy)
+    print("\n")
+
+  tf.reset_default_graph()
+
+  history_dict = {
+      "batch_loss": avg_batch_loss_list,
+      "batch_accuracy": batch_accuracy_list,
+      "test_accuracy": test_accuracy 
+  }
+
+  history[str(fold_counter)] = history_dict
+  history_dict = {}
+  fold_counter += 1
+
+for epoch in history:
+  print("\n==================================")
+  print("Epoch: %s" % epoch)
+
+  history_batch_loss = history[epoch]['batch_loss']
+  history_batch_accuracy = history[epoch]['batch_accuracy']
+  history_test_accuracy = history[epoch]['test_accuracy']
+
+  epochs_range = range(0, num_epoch)
+
+  plt.plot(epochs_range, history_batch_loss, 'g', label='Training Loss')
+  plt.title('Training Loss')
+  plt.xlabel('Epochs')
+  plt.ylabel('Loss')
+  plt.legend()
+  plt.show()
+
+  plt.plot(epochs_range, history_batch_accuracy, 'b', label='Batch Accuracy')
+  plt.title('Batch Accuracy')
+  plt.xlabel('Epochs')
+  plt.ylabel('Accuracy')
+  plt.legend()
+  plt.show()
+
+  print("Test Accuracy: %.1f%%" % history_test_accuracy)
+  print("\n")
