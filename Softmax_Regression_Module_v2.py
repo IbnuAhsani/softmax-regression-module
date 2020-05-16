@@ -17,19 +17,18 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+import seaborn as sn
 import tensorflow as tf
 from imblearn.under_sampling import NearMiss
 from imblearn.over_sampling import SMOTE
 from imblearn.combine import SMOTETomek
 from matplotlib import pyplot as plt
+from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.model_selection import train_test_split, KFold
 
 np.set_printoptions(threshold=sys.maxsize)
 
 # %matplotlib inline
-
-def get_accuracy(predictions, labels):
-  return (100.0 * np.sum(np.argmax(predictions, 1) == np.argmax(labels, 1)) / predictions.shape[0])
 
 """**Example Program**"""
 
@@ -80,11 +79,11 @@ def get_accuracy(predictions, labels):
 
 #     if (step % 500 == 0):
 #       print("minibatch loss at step %d: %f" % (step, l))
-#       print("minibatch accuracy: %.1f%%" % get_accuracy(predictions, batch_labels))
-#       print("validation accuracy: %.1f%%" % get_accuracy(valid_prediction.eval(), mnist.validation.labels))
+#       print("minibatch accuracy: %.1f%%" % get_accuracy(batch_labels, predictions))
+#       print("validation accuracy: %.1f%%" % get_accuracy(mnist.validation.labels, valid_prediction.eval()))
 #       print("\n")
   
-#   print("test accuracy: %.1f%%" % get_accuracy(test_prediction.eval(), mnist.test.labels))
+#   print("test accuracy: %.1f%%" % get_accuracy(mnist.test.labels, test_prediction.eval()))
 
 """**Data Preprocessing**"""
 
@@ -167,9 +166,9 @@ data_test_labels = data_test['target']
 batch_size = 32
 beta = .001
 learning_rate = 0.001
-num_epoch = 101
-num_features = 1561
-num_labels = 9
+num_epoch = 5
+num_features = data_frame.shape[1] - 1
+num_labels = value_counts.shape[0]
 
 def to_onehot(y):
   data = np.zeros((num_labels))
@@ -181,6 +180,58 @@ data_test_labels_one_hot_encoded = np.array([to_onehot(label) for label in data_
 
 print(data_train_labels_one_hot_encoded.shape)
 print(data_test_labels_one_hot_encoded.shape)
+
+def to_label_list(results):
+  label_list = []
+
+  for result in results:
+    prediction_label = np.argmax(result)
+    label_list.append(prediction_label)
+  
+  return label_list
+
+def get_accuracy(labels, predictions):
+  test_batch_size = predictions.shape[0]
+  total_correct_prediction = np.sum(np.argmax(predictions, axis=1) == np.argmax(labels, axis=1))
+  accuracy = 100.0 * total_correct_prediction / test_batch_size  
+  
+  return accuracy
+
+def get_fmeasure(labels, predictions):
+  
+  fmeasures = {}
+
+  for i in range(num_labels):
+    fmeasure_data_dict = {
+      "gi": 0,
+      "pi_intersect_gi": 0,
+    }
+
+    fmeasures[str(i)] = fmeasure_data_dict 
+    fmeasure_data_dict = {}
+
+  for i in range(len(labels)):
+    label = labels[i]
+    prediction = predictions[i]
+    fmeasures[str(label)]['gi'] += 1
+
+    if prediction == label:
+      fmeasures[str(label)]['pi_intersect_gi'] += 1
+  
+  total_fmeasure_score = 0
+
+  for i in range(num_labels):
+    fmeasure_data = fmeasures[str(i)]
+    
+    gi = fmeasure_data['gi']
+    pi_intersect_gi = fmeasure_data['pi_intersect_gi']
+    
+    fmeasure_score = (2 * pi_intersect_gi)/(2 * gi)
+    total_fmeasure_score += fmeasure_score
+
+  fmeasure_score = total_fmeasure_score / num_labels
+
+  return fmeasure_score
 
 graph = tf.Graph()
 
@@ -213,8 +264,6 @@ with tf.Session(graph=graph) as session:
   avg_batch_loss_list = []
   batch_accuracy_list = []
   total_batch = len(data_train_features)//batch_size
-  print("length of data train: %d" % len(data_train_features))
-  print("total batch: %d" % total_batch)
 
   for epoch in range(num_epoch):
     
@@ -231,7 +280,7 @@ with tf.Session(graph=graph) as session:
       total_loss += l
 
       if (i == (total_batch * batch_size) - batch_size):
-        batch_accuracy = get_accuracy(predictions, batch_labels)
+        batch_accuracy = get_accuracy(batch_labels, predictions)
         batch_accuracy_list.append(batch_accuracy)
 
         avg_batch_loss = total_loss / total_batch
@@ -258,7 +307,42 @@ with tf.Session(graph=graph) as session:
   plt.legend()
   plt.show()
 
-  print("test accuracy: %.1f%%" % get_accuracy(test_prediction.eval(), data_test_labels_one_hot_encoded))
+  test_predictions = test_prediction.eval()
+  test_accuracy = get_accuracy(test_predictions, data_test_labels_one_hot_encoded)
+  
+  print()
+  print("test accuracy: %.1f%%" % test_accuracy)
+
+  data_test_label_list = to_label_list(data_test_labels_one_hot_encoded)
+  test_predictions_label_list = to_label_list(test_predictions)
+
+  test_result_fmeasure = get_fmeasure(data_test_label_list, test_predictions_label_list)
+
+  print()
+  print('test_result_fmeasure')
+  print(test_result_fmeasure)
+  print()
+
+  test_result_confusion_matrix = confusion_matrix(data_test_label_list, test_predictions_label_list)
+  
+  print()
+  print('test_result_confusion_matrix')
+  print(test_result_confusion_matrix)
+  print()
+
+  test_classification_report = classification_report(data_test_label_list, test_predictions_label_list)
+
+  print()
+  print('test_classification_report')
+  print(test_classification_report)
+  print()
+
+  confusion_matrix_df = pd.DataFrame(test_result_confusion_matrix, range(9), range(9))
+  plt.figure(figsize=(12,9))
+  sn.set(font_scale=1.0)
+  sn.heatmap(confusion_matrix_df, annot=True, fmt='g', cmap="BuPu", annot_kws={"size": 12}) 
+
+  plt.show()
 
 """---
 
@@ -357,7 +441,7 @@ for train_index, test_index in kfold.split(data_frame_shuffled_twice):
 
         total_loss += l
 
-      batch_accuracy = get_accuracy(predictions, batch_labels)
+      batch_accuracy = get_accuracy(batch_labels, predictions)
       batch_accuracy_list.append(batch_accuracy)
 
       avg_batch_loss = total_loss / total_batch
@@ -368,7 +452,7 @@ for train_index, test_index in kfold.split(data_frame_shuffled_twice):
       print("minibatch accuracy: %.1f%%" % batch_accuracy)
       print("\n")
 
-    test_accuracy = get_accuracy(test_prediction.eval(), k_fold_test_labels_one_hot_encoded)
+    test_accuracy = get_accuracy(k_fold_test_labels_one_hot_encoded, test_prediction.eval())
     
     print("test accuracy: %.1f%%" % test_accuracy)
     print("\n")
