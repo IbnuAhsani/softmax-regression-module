@@ -7,6 +7,8 @@ Original file is located at
     https://colab.research.google.com/drive/1EKf8fGhgNolOaCy2QRD1t9sZJh9s4oA3
 
 [**The link for the tutorial**](https://www.youtube.com/watch?v=2JiXktBn_2M)
+
+**Import Dependencies**
 """
 
 # Commented out IPython magic to ensure Python compatibility.
@@ -30,64 +32,63 @@ np.set_printoptions(threshold=sys.maxsize)
 
 # %matplotlib inline
 
-"""**Example Program**"""
+"""**Helper Functions**"""
 
-# from tensorflow.examples.tutorials.mnist import input_data
-# mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
+def to_label_list(results):
+  label_list = []
 
-# graph = tf.Graph()
-# with graph.as_default():
-
-#   batch_size = 128
-#   beta = .001
-#   image_size = 28
-#   num_labels = 10
-
-#   tf_train_dataset = tf.placeholder(tf.float32, shape=(batch_size, image_size * image_size))
-#   tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
-#   tf_valid_dataset = tf.constant(mnist.validation.images)
-#   tf_test_dataset = tf.constant(mnist.test.images)
-
-#   w_logit = tf.Variable(tf.truncated_normal([image_size * image_size, num_labels]))
-#   b_logit = tf.Variable(tf.zeros([num_labels]))
-
-#   def model(data):
-#     return tf.matmul(data, w_logit) + b_logit
-
-#   logits = model(tf_train_dataset)
-#   loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=tf_train_labels))
-#   regularized_loss = tf.nn.l2_loss(w_logit) 
-#   total_loss = loss + beta + regularized_loss
-
-#   optimizer = tf.train.GradientDescentOptimizer(0.5).minimize(total_loss)
-
-#   train_prediction = tf.nn.softmax(logits)
-#   valid_prediction = tf.nn.softmax(model(tf_valid_dataset))
-#   test_prediction = tf.nn.softmax(model(tf_test_dataset))
-
-# num_step = 1001
-
-# with tf.Session(graph=graph) as session:
-#   tf.global_variables_initializer().run()
-#   print("initialized")
-
-#   for step in range(num_step):
-#     batch_data, batch_labels = mnist.train.next_batch(batch_size=batch_size)
-#     feed_dict = {tf_train_dataset : batch_data, tf_train_labels : batch_labels}
-
-#     _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
-
-#     if (step % 500 == 0):
-#       print("minibatch loss at step %d: %f" % (step, l))
-#       print("minibatch accuracy: %.1f%%" % get_accuracy(batch_labels, predictions))
-#       print("validation accuracy: %.1f%%" % get_accuracy(mnist.validation.labels, valid_prediction.eval()))
-#       print("\n")
+  for result in results:
+    prediction_label = np.argmax(result)
+    label_list.append(prediction_label)
   
-#   print("test accuracy: %.1f%%" % get_accuracy(mnist.test.labels, test_prediction.eval()))
+  return label_list
+
+def get_accuracy(labels, predictions):
+  test_batch_size = predictions.shape[0]
+  total_correct_prediction = np.sum(np.argmax(predictions, axis=1) == np.argmax(labels, axis=1))
+  accuracy = 100.0 * total_correct_prediction / test_batch_size  
+  
+  return accuracy
+
+def get_fmeasure(labels, predictions):
+  
+  fmeasures = {}
+
+  for i in range(num_labels):
+    fmeasure_data_dict = {
+      "gi": 0,
+      "pi_intersect_gi": 0,
+    }
+
+    fmeasures[str(i)] = fmeasure_data_dict 
+    fmeasure_data_dict = {}
+
+  for i in range(len(labels)):
+    label = labels[i]
+    prediction = predictions[i]
+    fmeasures[str(label)]['gi'] += 1
+
+    if prediction == label:
+      fmeasures[str(label)]['pi_intersect_gi'] += 1
+  
+  total_fmeasure_score = 0
+
+  for i in range(num_labels):
+    fmeasure_data = fmeasures[str(i)]
+    
+    gi = fmeasure_data['gi']
+    pi_intersect_gi = fmeasure_data['pi_intersect_gi']
+    
+    fmeasure_score = (2 * pi_intersect_gi)/(2 * gi)
+    total_fmeasure_score += fmeasure_score
+
+  fmeasure_score = total_fmeasure_score / num_labels
+
+  return fmeasure_score
 
 """**Data Preprocessing**"""
 
-data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/Hypothesis Data/data-17-fv-tf-idf-scores-200.csv', header=None, sep=',')
+data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/Hypothesis Data/data-18-fv-tf-idf-scores-200.csv', header=None, sep=',')
 data_frame.shape
 
 header = []
@@ -153,7 +154,186 @@ data_frame_shuffled_once = data_frame_undersampled.sample(frac=1)
 data_frame_shuffled_twice = data_frame_shuffled_once.sample(frac=1)
 data_frame_shuffled_twice.head()
 
-"""**Program Train Test Split Data**"""
+"""**Program KFOLD**"""
+
+batch_size = 32
+beta = .001
+learning_rate = 0.001
+num_epoch = 101
+num_k_splits = 10
+num_features = data_frame.shape[1] - 1
+num_labels = value_counts.shape[0]
+
+def to_onehot(y):
+  data = np.zeros((num_labels))
+  data[y] = 1
+  return data
+
+history = {}
+fold_counter = 1
+kfold = KFold(n_splits= num_k_splits, random_state=None, shuffle=True)
+
+for train_index, test_index in kfold.split(data_frame_shuffled_twice):
+
+  print("\n==================================\n")
+  print("Fold: %d" % fold_counter)
+  print("\n")
+
+  k_fold_train_data = data_frame_shuffled_twice.loc[train_index, : ]
+  k_fold_train_features = k_fold_train_data.drop('target',axis=1).to_numpy()
+  k_fold_train_labels = k_fold_train_data['target']
+  k_fold_train_labels_one_hot_encoded = np.array([to_onehot(label) for label in k_fold_train_labels])
+
+  k_fold_test_data = data_frame_shuffled_twice.loc[test_index, : ]
+  k_fold_test_features = k_fold_test_data.drop('target',axis=1).to_numpy()
+  k_fold_test_labels = k_fold_test_data['target']
+  k_fold_test_labels_one_hot_encoded = np.array([to_onehot(label) for label in k_fold_test_labels])
+
+  reindexed_train_index = np.arange(len(train_index)) 
+
+  graph = tf.Graph()
+
+  with graph.as_default():
+
+    tf_train_dataset = tf.placeholder(tf.float32, shape=(batch_size, num_features))
+    tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
+    tf_test_dataset = tf.constant(k_fold_test_features, dtype=tf.float32)
+
+    w_logit = tf.Variable(tf.truncated_normal([num_features, num_labels]))
+    b_logit = tf.Variable(tf.zeros([num_labels]))
+
+    def model(data):
+      return tf.matmul(data, w_logit) + b_logit
+
+    logits = model(tf_train_dataset)
+    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=tf_train_labels))
+    regularized_loss = tf.nn.l2_loss(w_logit) 
+    total_loss = loss + beta + regularized_loss
+
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(total_loss)
+
+    train_prediction = tf.nn.softmax(logits)
+    test_prediction = tf.nn.softmax(model(tf_test_dataset))
+
+  with tf.Session(graph=graph) as session:
+    tf.global_variables_initializer().run()
+
+    avg_batch_loss_list = []
+    batch_accuracy_list = []
+    total_batch = len(train_index)//batch_size
+    
+    for epoch in range(num_epoch):
+
+      total_loss = 0
+
+      for i in range(0, (total_batch * batch_size), batch_size):
+
+        batch_index = reindexed_train_index[i : i+1*batch_size]
+        batch_features = k_fold_train_features[batch_index, : ]
+        batch_labels = k_fold_train_labels_one_hot_encoded[batch_index, : ]
+
+        feed_dict = {tf_train_dataset : batch_features, tf_train_labels : batch_labels}
+        _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
+
+        total_loss += l
+
+      batch_accuracy = get_accuracy(batch_labels, predictions)
+      batch_accuracy_list.append(batch_accuracy)
+
+      avg_batch_loss = total_loss / total_batch
+      avg_batch_loss_list.append(avg_batch_loss)
+      
+      print("epoch: %d" % epoch)
+      print("minibatch loss: %f" % avg_batch_loss)
+      print("minibatch accuracy: %.2f%%" % batch_accuracy)
+      print("\n")
+
+    test_predictions = test_prediction.eval()
+    test_predictions_label_list = to_label_list(test_predictions)
+    data_test_label_list = to_label_list(k_fold_test_labels_one_hot_encoded)
+
+    test_accuracy = get_accuracy(k_fold_test_labels_one_hot_encoded, test_predictions)
+    test_fmeasure = get_fmeasure(data_test_label_list, test_predictions_label_list)
+    test_confusion_matrix = confusion_matrix(data_test_label_list, test_predictions_label_list)
+    test_classification_report = classification_report(data_test_label_list, test_predictions_label_list)
+    
+    print("test accuracy: %.2f%%" % test_accuracy)
+    print('test fmeasure: %.2f' % test_fmeasure)
+    print("\n")
+
+  tf.reset_default_graph()
+
+  history_dict = {
+      "batch_loss": avg_batch_loss_list,
+      "batch_accuracy": batch_accuracy_list,
+      "test_accuracy": test_accuracy,
+      "test_fmeasure": test_fmeasure,
+      "confusion_matrix": test_confusion_matrix,
+      "classification_report": test_classification_report
+  }
+
+  history[str(fold_counter)] = history_dict
+  history_dict = {}
+  fold_counter += 1
+
+for epoch in history:
+  print("\n==================================")
+  print("Epoch: %s" % epoch)
+
+  batch_loss = history[epoch]['batch_loss']
+  batch_accuracy = history[epoch]['batch_accuracy']
+  test_accuracy = history[epoch]['test_accuracy']
+  test_fmeasure = history[epoch]['test_fmeasure']
+  confusion_matrix = history[epoch]['confusion_matrix']
+
+  epochs_range = range(0, num_epoch)
+
+  plt.plot(epochs_range, batch_loss, 'g', label='Training Loss')
+  plt.title('Training Loss')
+  plt.xlabel('Epochs')
+  plt.ylabel('Loss')
+  plt.legend()
+  plt.show()
+
+  plt.plot(epochs_range, batch_accuracy, 'b', label='Batch Accuracy')
+  plt.title('Batch Accuracy')
+  plt.xlabel('Epochs')
+  plt.ylabel('Accuracy')
+  plt.legend()
+  plt.show()
+
+  confusion_matrix_df = pd.DataFrame(confusion_matrix, range(9), range(9))
+  plt.figure(figsize=(8,5))
+  sn.set(font_scale=1.0)
+  sn.heatmap(confusion_matrix_df, annot=True, fmt='g', cmap="BuPu", annot_kws={"size": 8}) 
+
+  plt.show()
+
+  print("\n")
+  print('Test Classification Report')
+  print(test_classification_report)
+  print("\n")
+
+  print("Test Accuracy: %.2f%%" % test_accuracy)
+  print("Test F-Measure: %.2f" % test_fmeasure)
+  print("\n")
+
+"""---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+**Program Train Test Split Data**
+"""
 
 data_train, data_test = train_test_split(data_frame_shuffled_twice, test_size = 0.2)
 
@@ -166,7 +346,7 @@ data_test_labels = data_test['target']
 batch_size = 32
 beta = .001
 learning_rate = 0.001
-num_epoch = 5
+num_epoch = 50
 num_features = data_frame.shape[1] - 1
 num_labels = value_counts.shape[0]
 
@@ -180,58 +360,6 @@ data_test_labels_one_hot_encoded = np.array([to_onehot(label) for label in data_
 
 print(data_train_labels_one_hot_encoded.shape)
 print(data_test_labels_one_hot_encoded.shape)
-
-def to_label_list(results):
-  label_list = []
-
-  for result in results:
-    prediction_label = np.argmax(result)
-    label_list.append(prediction_label)
-  
-  return label_list
-
-def get_accuracy(labels, predictions):
-  test_batch_size = predictions.shape[0]
-  total_correct_prediction = np.sum(np.argmax(predictions, axis=1) == np.argmax(labels, axis=1))
-  accuracy = 100.0 * total_correct_prediction / test_batch_size  
-  
-  return accuracy
-
-def get_fmeasure(labels, predictions):
-  
-  fmeasures = {}
-
-  for i in range(num_labels):
-    fmeasure_data_dict = {
-      "gi": 0,
-      "pi_intersect_gi": 0,
-    }
-
-    fmeasures[str(i)] = fmeasure_data_dict 
-    fmeasure_data_dict = {}
-
-  for i in range(len(labels)):
-    label = labels[i]
-    prediction = predictions[i]
-    fmeasures[str(label)]['gi'] += 1
-
-    if prediction == label:
-      fmeasures[str(label)]['pi_intersect_gi'] += 1
-  
-  total_fmeasure_score = 0
-
-  for i in range(num_labels):
-    fmeasure_data = fmeasures[str(i)]
-    
-    gi = fmeasure_data['gi']
-    pi_intersect_gi = fmeasure_data['pi_intersect_gi']
-    
-    fmeasure_score = (2 * pi_intersect_gi)/(2 * gi)
-    total_fmeasure_score += fmeasure_score
-
-  fmeasure_score = total_fmeasure_score / num_labels
-
-  return fmeasure_score
 
 graph = tf.Graph()
 
@@ -358,140 +486,58 @@ with tf.Session(graph=graph) as session:
 
 ---
 
-**FAILED Program KFOLD**
+**Example Program**
 """
 
-batch_size = 32
-beta = .001
-learning_rate = 0.001
-num_epoch = 101
-num_features = 1561
-num_labels = 9
-num_k_splits = 10
+# from tensorflow.examples.tutorials.mnist import input_data
+# mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
 
-def to_onehot(y):
-  data = np.zeros((num_labels))
-  data[y] = 1
-  return data
+# graph = tf.Graph()
+# with graph.as_default():
 
-history = {}
-fold_counter = 1
-kfold = KFold(n_splits= num_k_splits, random_state=None, shuffle=True)
+#   batch_size = 128
+#   beta = .001
+#   image_size = 28
+#   num_labels = 10
 
-for train_index, test_index in kfold.split(data_frame_shuffled_twice):
+#   tf_train_dataset = tf.placeholder(tf.float32, shape=(batch_size, image_size * image_size))
+#   tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
+#   tf_valid_dataset = tf.constant(mnist.validation.images)
+#   tf_test_dataset = tf.constant(mnist.test.images)
 
-  print("\n==================================")
-  print("Fold: %d" % fold_counter)
+#   w_logit = tf.Variable(tf.truncated_normal([image_size * image_size, num_labels]))
+#   b_logit = tf.Variable(tf.zeros([num_labels]))
 
-  k_fold_train_data = data_frame_shuffled_twice.loc[train_index, : ]
-  k_fold_train_features = k_fold_train_data.drop('target',axis=1).to_numpy()
-  k_fold_train_labels = k_fold_train_data['target']
-  k_fold_train_labels_one_hot_encoded = np.array([to_onehot(label) for label in k_fold_train_labels])
+#   def model(data):
+#     return tf.matmul(data, w_logit) + b_logit
 
-  k_fold_test_data = data_frame_shuffled_twice.loc[test_index, : ]
-  k_fold_test_features = k_fold_test_data.drop('target',axis=1).to_numpy()
-  k_fold_test_labels = k_fold_test_data['target']
-  k_fold_test_labels_one_hot_encoded = np.array([to_onehot(label) for label in k_fold_test_labels])
+#   logits = model(tf_train_dataset)
+#   loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=tf_train_labels))
+#   regularized_loss = tf.nn.l2_loss(w_logit) 
+#   total_loss = loss + beta + regularized_loss
 
-  reindexed_train_index = np.arange(len(train_index)) 
+#   optimizer = tf.train.GradientDescentOptimizer(0.5).minimize(total_loss)
 
-  graph = tf.Graph()
+#   train_prediction = tf.nn.softmax(logits)
+#   valid_prediction = tf.nn.softmax(model(tf_valid_dataset))
+#   test_prediction = tf.nn.softmax(model(tf_test_dataset))
 
-  with graph.as_default():
+# num_step = 1001
 
-    tf_train_dataset = tf.placeholder(tf.float32, shape=(batch_size, num_features))
-    tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
-    tf_test_dataset = tf.constant(k_fold_test_features, dtype=tf.float32)
+# with tf.Session(graph=graph) as session:
+#   tf.global_variables_initializer().run()
+#   print("initialized")
 
-    w_logit = tf.Variable(tf.truncated_normal([num_features, num_labels]))
-    b_logit = tf.Variable(tf.zeros([num_labels]))
+#   for step in range(num_step):
+#     batch_data, batch_labels = mnist.train.next_batch(batch_size=batch_size)
+#     feed_dict = {tf_train_dataset : batch_data, tf_train_labels : batch_labels}
 
-    def model(data):
-      return tf.matmul(data, w_logit) + b_logit
+#     _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
 
-    logits = model(tf_train_dataset)
-    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=tf_train_labels))
-    regularized_loss = tf.nn.l2_loss(w_logit) 
-    total_loss = loss + beta + regularized_loss
-
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(total_loss)
-
-    train_prediction = tf.nn.softmax(logits)
-    test_prediction = tf.nn.softmax(model(tf_test_dataset))
-
-  with tf.Session(graph=graph) as session:
-    tf.global_variables_initializer().run()
-
-    avg_batch_loss_list = []
-    batch_accuracy_list = []
-    total_batch = len(train_index)//batch_size
-    
-    for epoch in range(num_epoch):
-
-      total_loss = 0
-
-      for i in range(0, (total_batch * batch_size), batch_size):
-
-        batch_index = reindexed_train_index[i : i+1*batch_size]
-        batch_features = k_fold_train_features[batch_index, : ]
-        batch_labels = k_fold_train_labels_one_hot_encoded[batch_index, : ]
-
-        feed_dict = {tf_train_dataset : batch_features, tf_train_labels : batch_labels}
-        _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
-
-        total_loss += l
-
-      batch_accuracy = get_accuracy(batch_labels, predictions)
-      batch_accuracy_list.append(batch_accuracy)
-
-      avg_batch_loss = total_loss / total_batch
-      avg_batch_loss_list.append(avg_batch_loss)
-      
-      print("epoch: %d" % epoch)
-      print("minibatch loss: %f" % avg_batch_loss)
-      print("minibatch accuracy: %.1f%%" % batch_accuracy)
-      print("\n")
-
-    test_accuracy = get_accuracy(k_fold_test_labels_one_hot_encoded, test_prediction.eval())
-    
-    print("test accuracy: %.1f%%" % test_accuracy)
-    print("\n")
-
-  tf.reset_default_graph()
-
-  history_dict = {
-      "batch_loss": avg_batch_loss_list,
-      "batch_accuracy": batch_accuracy_list,
-      "test_accuracy": test_accuracy 
-  }
-
-  history[str(fold_counter)] = history_dict
-  history_dict = {}
-  fold_counter += 1
-
-for epoch in history:
-  print("\n==================================")
-  print("Epoch: %s" % epoch)
-
-  history_batch_loss = history[epoch]['batch_loss']
-  history_batch_accuracy = history[epoch]['batch_accuracy']
-  history_test_accuracy = history[epoch]['test_accuracy']
-
-  epochs_range = range(0, num_epoch)
-
-  plt.plot(epochs_range, history_batch_loss, 'g', label='Training Loss')
-  plt.title('Training Loss')
-  plt.xlabel('Epochs')
-  plt.ylabel('Loss')
-  plt.legend()
-  plt.show()
-
-  plt.plot(epochs_range, history_batch_accuracy, 'b', label='Batch Accuracy')
-  plt.title('Batch Accuracy')
-  plt.xlabel('Epochs')
-  plt.ylabel('Accuracy')
-  plt.legend()
-  plt.show()
-
-  print("Test Accuracy: %.1f%%" % history_test_accuracy)
-  print("\n")
+#     if (step % 500 == 0):
+#       print("minibatch loss at step %d: %f" % (step, l))
+#       print("minibatch accuracy: %.1f%%" % get_accuracy(batch_labels, predictions))
+#       print("validation accuracy: %.1f%%" % get_accuracy(mnist.validation.labels, valid_prediction.eval()))
+#       print("\n")
+  
+#   print("test accuracy: %.1f%%" % get_accuracy(mnist.test.labels, test_prediction.eval()))
