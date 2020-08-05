@@ -15,19 +15,20 @@ Original file is located at
 import os
 import sys
 import pickle
+import time
+import pytz
+import datetime
 import numpy as np
 import pandas as pd
 import seaborn as sn
 import sklearn
+from io import StringIO
 from sklearn import metrics 
-from imblearn.under_sampling import NearMiss
-from imblearn.over_sampling import SMOTE
-from imblearn.combine import SMOTETomek
 from matplotlib import pyplot as plt
+from imblearn.under_sampling import NearMiss
 from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression, SGDClassifier
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -35,7 +36,8 @@ np.set_printoptions(threshold=sys.maxsize)
 
 """**Data Preprocessing**"""
 
-data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/Hypothesis Data/data-23-tf-idf.csv', header=None, sep=',')
+data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/Hypothesis Data/data-23-tf-idf-150-feature-final.csv', header=None, sep=',')
+# data_frame = pd.read_csv('/content/drive/My Drive/Colab Notebooks/Content-Based Recommender System Data/Sample Data/data-3-journals-similar-tf-idf-value-50-feature.csv', header=None, sep=',')
 data_frame.shape
 
 header = []
@@ -47,6 +49,8 @@ header.append('target')
 
 data_frame.columns = header
 print(data_frame.columns)
+
+data_frame['target'].value_counts()
 
 ax = data_frame['target'].value_counts().plot(kind='bar', figsize=(7,5), fontsize=12);
 ax.set_alpha(0.8)
@@ -64,7 +68,7 @@ for i in ax.patches:
 data_labels = data_frame['target']
 data_features = data_frame.drop('target',axis=1)
 
-near_miss = NearMiss(random_state=42)
+near_miss = NearMiss(version=2)
 x_undersampled, y_undersampled = near_miss.fit_sample(data_features, data_labels)
 
 print(x_undersampled.shape)
@@ -79,6 +83,7 @@ data_labels_df = pd.DataFrame(data = y_undersampled[0:],
                                 columns = ['target'])
 
 data_frame_undersampled = data_features_df.join(data_labels_df)
+data_frame_undersampled.shape
 
 ax = data_frame_undersampled['target'].value_counts().plot(kind='bar', figsize=(7,5), fontsize=12);
 ax.set_alpha(0.8)
@@ -98,13 +103,11 @@ data_frame_shuffled_twice = data_frame_shuffled_once.sample(frac=1)
 data_frame_shuffled_twice.sample(3)
 
 target_counts = data_frame['target'].value_counts()
-batch_size = 32
-beta = .001
-learning_rate = 0.001
-num_epoch = 101
-num_k_splits = 10
-num_features = data_frame.shape[1] - 1
 num_labels = target_counts.shape[0]
+num_features = data_frame.shape[1] - 1
+num_epoch = 1000
+num_k_splits = 10
+learning_rate = 0.0001
 
 """**Helper Functions**"""
 
@@ -159,6 +162,12 @@ def get_fmeasure(labels, predictions):
     pi_intersect_gi = fmeasure_data['pi_intersect_gi']
     
     fmeasure_score = (2 * pi_intersect_gi)/(2 * gi)
+
+    # print('i: ', i)
+    # print('pi_intersect_gi: ', pi_intersect_gi)
+    # print('gi: ', gi)
+    # print('fmeasure_score: ', fmeasure_score)
+
     total_fmeasure_score += fmeasure_score
 
   fmeasure_score = total_fmeasure_score / num_labels
@@ -172,6 +181,8 @@ fold_counter = 1
 strat_kfold = StratifiedKFold(n_splits= num_k_splits)
 
 for train_index, test_index in strat_kfold.split(data_features, data_labels):
+  
+  start_time = time.time()
 
   print("\n==================================\n")
   print("Fold: %d" % fold_counter)
@@ -184,9 +195,9 @@ for train_index, test_index in strat_kfold.split(data_features, data_labels):
   kfold_test_labels = data_labels[test_index]
   kfold_test_labels_onehot_encoded = np.array([to_onehot(label) for label in kfold_test_labels])
 
-  classifier = LogisticRegression(random_state=0, multi_class='multinomial', solver='newton-cg')
+  classifier = SGDClassifier(loss="log",penalty="l2",n_iter_no_change=num_epoch,alpha=learning_rate)
   model = classifier.fit(kfold_train_features, kfold_train_labels)
-  
+
   test_prediction = model.predict(kfold_test_features)
   test_prediction_proba = model.predict_proba(kfold_test_features)
 
@@ -214,20 +225,17 @@ for train_index, test_index in strat_kfold.split(data_features, data_labels):
   print('confusion matrix')
   plt.show()
 
-  # model_name = 'model_sastrawi_{}.pkl'.format(fold_counter)
+  # print('model.classes_: ', model.classes_)
+  # print('model.coef_: ', model.coef_)
+  # print('model.intercept_: ', model.intercept_)
+  # print('model.n_iter_: ', model.n_iter_)
 
-  # pickle.dump(model, open(model_name,'wb'))
+  execution_time = (time.time() - start_time)/60
+  now = datetime.datetime.now(pytz.timezone('Asia/Jakarta')).time()
+  print("execution time: %s minutes" % execution_time)
+  print("finished at: ", now)
+
+  model_name = 'model_sastrawi_{}.pkl'.format(fold_counter)
+  pickle.dump(model, open(model_name,'wb'))
 
   fold_counter += 1
-
-# near_miss = SMOTE()
-# x_undersampled, y_undersampled = near_miss.fit_sample(data_features, data_labels)
-
-# print(x_undersampled.shape)
-# print(y_undersampled.shape)
-
-# smk = SMOTETomek(random_state=42)
-# x_undersampled, y_undersampled = smk.fit_sample(data_features, data_labels)
-
-# print(x_undersampled.shape)
-# print(y_undersampled.shape)
